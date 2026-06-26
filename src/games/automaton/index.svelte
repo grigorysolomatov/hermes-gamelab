@@ -4,12 +4,13 @@
   let { onBack } = $props()
 
   // ---- Constants ----
-  const DECK_H = 180
   const AGENT_SPEED = 80
   const WORK_TIME = 0.5
   const INV_CAP = 5
   const ZOOM_MIN = 0.4
   const ZOOM_MAX = 2.0
+  const AGENT_COLORS = ['#ffffff', '#00bcd4', '#ff9800']
+  const NODE_RESOURCE = { mine: 'gold', rock: 'stone', tree: 'wood' }
 
   // ---- DOM refs ----
   let canvasEl
@@ -25,22 +26,23 @@
   let islandPoly = $state([])
   let nodes = $state([])
 
-  let agent = $state({
-    x: 0, y: 0,
-    state: 'IDLE',
-    cardIndex: 0,
-    inventory: 0,
-    workTimer: 0,
-  })
+  function makeAgent() {
+    return { x: 0, y: 0, state: 'IDLE', cardIndex: 0, inventory: { gold: 0, wood: 0, stone: 0 }, workTimer: 0 }
+  }
 
-  let deck = $state([
-    { type: 'extract', target: null },
-    { type: 'deposit', target: null },
+  let agents = $state([makeAgent(), makeAgent(), makeAgent()])
+
+  let decks = $state([
+    [{ type: 'extract', target: null }, { type: 'deposit', target: null }],
+    [{ type: 'extract', target: null }, { type: 'deposit', target: null }],
+    [{ type: 'extract', target: null }, { type: 'deposit', target: null }],
   ])
 
-  let baseGold = $state(0)
+  let baseResources = $state({ gold: 0, wood: 0, stone: 0 })
   let isPlaying = $state(false)
   let dragging = $state(null) // { cardIndex, ghostX, ghostY }
+  let selectedAgent = $state(0)
+  let deckCollapsed = $state(false)
 
   // ---- Non-reactive interaction refs ----
   let panRef = { active: false, startX: 0, startY: 0, camX: 0, camY: 0 }
@@ -57,6 +59,10 @@
         inside = !inside
     }
     return inside
+  }
+
+  function inventoryTotal(inv) {
+    return inv.gold + inv.wood + inv.stone
   }
 
   // ---- Generation ----
@@ -117,11 +123,9 @@
     const W = canvasEl.width
     const H = canvasEl.height
 
-    // Water
     ctx.fillStyle = '#1a2a3a'
     ctx.fillRect(0, 0, W, H)
 
-    // Island polygon
     if (islandPoly.length) {
       ctx.beginPath()
       const [fx, fy] = w2s(islandPoly[0].x, islandPoly[0].y)
@@ -135,7 +139,6 @@
       ctx.fill()
     }
 
-    // Nodes
     const isDragging = dragging !== null
     for (const node of nodes) {
       const [sx, sy] = w2s(node.x, node.y)
@@ -165,43 +168,45 @@
       ctx.fillText(node.label, sx, sy + r + 3)
     }
 
-    // Agent
-    const [ax, ay] = w2s(agent.x, agent.y)
-    const agR = Math.max(6, 10 * cam.zoom)
+    for (let ai = 0; ai < agents.length; ai++) {
+      const ag = agents[ai]
+      const [ax, ay] = w2s(ag.x, ag.y)
+      const agR = Math.max(6, 10 * cam.zoom)
+      const color = AGENT_COLORS[ai]
 
-    // Violet arc around agent
-    ctx.beginPath()
-    ctx.arc(ax, ay, agR + 5, -Math.PI / 2, Math.PI * 1.5)
-    ctx.strokeStyle = '#7c3aed'
-    ctx.lineWidth = 2
-    ctx.stroke()
-
-    ctx.beginPath()
-    ctx.arc(ax, ay, agR, 0, Math.PI * 2)
-    ctx.fillStyle = '#ffffff'
-    ctx.fill()
-
-    // Inventory badge
-    if (agent.inventory > 0) {
-      const bx = ax
-      const by = ay - agR - 14
-      const text = `${agent.inventory}🪙`
-      ctx.font = '11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      const tw = ctx.measureText(text).width
-      const pw = tw + 10
-      const ph = 16
-      ctx.fillStyle = 'rgba(0,0,0,0.8)'
       ctx.beginPath()
-      if (ctx.roundRect) {
-        ctx.roundRect(bx - pw / 2, by - ph / 2, pw, ph, 8)
-      } else {
-        ctx.rect(bx - pw / 2, by - ph / 2, pw, ph)
-      }
+      ctx.arc(ax, ay, agR + 5, -Math.PI / 2, Math.PI * 1.5)
+      ctx.strokeStyle = '#7c3aed'
+      ctx.lineWidth = 2
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.arc(ax, ay, agR, 0, Math.PI * 2)
+      ctx.fillStyle = color
       ctx.fill()
-      ctx.fillStyle = '#ffffff'
-      ctx.fillText(text, bx, by)
+
+      const total = inventoryTotal(ag.inventory)
+      if (total > 0) {
+        const bx = ax
+        const by = ay - agR - 14
+        const text = `${total}`
+        ctx.font = '11px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const tw = ctx.measureText(text).width
+        const pw = tw + 10
+        const ph = 16
+        ctx.fillStyle = 'rgba(0,0,0,0.8)'
+        ctx.beginPath()
+        if (ctx.roundRect) {
+          ctx.roundRect(bx - pw / 2, by - ph / 2, pw, ph, 8)
+        } else {
+          ctx.rect(bx - pw / 2, by - ph / 2, pw, ph)
+        }
+        ctx.fill()
+        ctx.fillStyle = color
+        ctx.fillText(text, bx, by)
+      }
     }
   }
 
@@ -209,62 +214,74 @@
   function tick(ts) {
     const dt = lastTs ? Math.min((ts - lastTs) / 1000, 0.05) : 0
     lastTs = ts
-    if (isPlaying) updateAgent(dt)
+    if (isPlaying) {
+      for (let ai = 0; ai < agents.length; ai++) {
+        updateAgent(ai, dt)
+      }
+    }
     draw()
     raf = requestAnimationFrame(tick)
   }
 
   // ---- Agent state machine ----
-  function updateAgent(dt) {
-    if (!deck.length) return
+  function updateAgent(agentIndex, dt) {
+    const ag = agents[agentIndex]
+    const dk = decks[agentIndex]
+    if (!dk.length) return
 
-    if (agent.state === 'IDLE') {
-      // Find next card with a target, starting from current index
+    if (ag.state === 'IDLE') {
       let found = false
-      for (let i = 0; i < deck.length; i++) {
-        const ni = (agent.cardIndex + i) % deck.length
-        if (deck[ni]?.target) {
-          agent.cardIndex = ni
+      for (let i = 0; i < dk.length; i++) {
+        const ni = (ag.cardIndex + i) % dk.length
+        if (dk[ni]?.target) {
+          ag.cardIndex = ni
           found = true
           break
         }
       }
       if (!found) return
-      agent.state = 'MOVING'
+      ag.state = 'MOVING'
       return
     }
 
-    if (agent.state === 'MOVING') {
-      const card = deck[agent.cardIndex]
-      if (!card?.target) { agent.state = 'IDLE'; return }
-      const dx = card.target.x - agent.x
-      const dy = card.target.y - agent.y
+    if (ag.state === 'MOVING') {
+      const card = dk[ag.cardIndex]
+      if (!card?.target) { ag.state = 'IDLE'; return }
+      const dx = card.target.x - ag.x
+      const dy = card.target.y - ag.y
       const dist = Math.hypot(dx, dy)
       if (dist < 2) {
-        agent.x = card.target.x
-        agent.y = card.target.y
-        agent.state = 'WORKING'
-        agent.workTimer = 0
+        ag.x = card.target.x
+        ag.y = card.target.y
+        ag.state = 'WORKING'
+        ag.workTimer = 0
       } else {
         const mv = AGENT_SPEED * dt
-        agent.x += (dx / dist) * Math.min(mv, dist)
-        agent.y += (dy / dist) * Math.min(mv, dist)
+        ag.x += (dx / dist) * Math.min(mv, dist)
+        ag.y += (dy / dist) * Math.min(mv, dist)
       }
       return
     }
 
-    if (agent.state === 'WORKING') {
-      agent.workTimer += dt
-      if (agent.workTimer >= WORK_TIME) {
-        const card = deck[agent.cardIndex]
-        if (card?.type === 'extract') {
-          agent.inventory = Math.min(agent.inventory + 1, INV_CAP)
+    if (ag.state === 'WORKING') {
+      ag.workTimer += dt
+      if (ag.workTimer >= WORK_TIME) {
+        const card = dk[ag.cardIndex]
+        if (card?.type === 'extract' && card.target) {
+          const resource = NODE_RESOURCE[card.target.type]
+          if (resource && inventoryTotal(ag.inventory) < INV_CAP) {
+            ag.inventory = { ...ag.inventory, [resource]: ag.inventory[resource] + 1 }
+          }
         } else if (card?.type === 'deposit') {
-          baseGold += agent.inventory
-          agent.inventory = 0
+          baseResources = {
+            gold: baseResources.gold + ag.inventory.gold,
+            wood: baseResources.wood + ag.inventory.wood,
+            stone: baseResources.stone + ag.inventory.stone,
+          }
+          ag.inventory = { gold: 0, wood: 0, stone: 0 }
         }
-        agent.cardIndex = (agent.cardIndex + 1) % deck.length
-        agent.state = 'IDLE'
+        ag.cardIndex = (ag.cardIndex + 1) % dk.length
+        ag.state = 'IDLE'
       }
     }
   }
@@ -274,8 +291,8 @@
   function doStop() { isPlaying = false }
   function doReset() {
     isPlaying = false
-    baseGold = 0
-    agent = { x: 0, y: 0, state: 'IDLE', cardIndex: 0, inventory: 0, workTimer: 0 }
+    baseResources = { gold: 0, wood: 0, stone: 0 }
+    agents = [makeAgent(), makeAgent(), makeAgent()]
   }
 
   // ---- Canvas pointer: pan / pinch-zoom ----
@@ -379,14 +396,16 @@
 
     if (hitNode) {
       const idx = dragging.cardIndex
-      deck = deck.map((c, i) => i === idx ? { ...c, target: hitNode } : c)
+      const ai = selectedAgent
+      decks = decks.map((dk, di) => di === ai ? dk.map((c, i) => i === idx ? { ...c, target: hitNode } : c) : dk)
     }
     dragging = null
   }
 
   function clearTarget(cardIndex, e) {
     e.stopPropagation()
-    deck = deck.map((c, i) => i === cardIndex ? { ...c, target: null } : c)
+    const ai = selectedAgent
+    decks = decks.map((dk, di) => di === ai ? dk.map((c, i) => i === cardIndex ? { ...c, target: null } : c) : dk)
   }
 
   // ---- Resize / orientation ----
@@ -437,63 +456,87 @@
     </div>
   {/if}
 
-  <!-- Map area -->
-  <div class="map-area">
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <canvas
-      bind:this={canvasEl}
-      onmousedown={onCanvasMouseDown}
-      ontouchstart={onCanvasTouchStart}
-    ></canvas>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <canvas
+    bind:this={canvasEl}
+    onmousedown={onCanvasMouseDown}
+    ontouchstart={onCanvasTouchStart}
+  ></canvas>
 
-    <div class="hud">🪙 {baseGold}</div>
+  <div class="hud">
+    🪙 {baseResources.gold}&nbsp;&nbsp;🪵 {baseResources.wood}&nbsp;&nbsp;🪨 {baseResources.stone}
+  </div>
 
-    <button class="back-btn" onclick={onBack}>← back</button>
+  <button class="back-btn" onclick={onBack}>← back</button>
 
-    {#if dragging !== null}
-      <div
-        class="ghost-card"
-        style="left:{dragging.ghostX}px;top:{dragging.ghostY}px"
-      >
-        <div class="ghost-type">{deck[dragging.cardIndex]?.type === 'extract' ? 'EXTRACT' : 'DEPOSIT'}</div>
-        <div class="ghost-target">
-          {#if deck[dragging.cardIndex]?.target}
-            {deck[dragging.cardIndex].target.emoji} {deck[dragging.cardIndex].target.label}
-          {:else}
-            — assign target —
-          {/if}
+  {#if dragging !== null}
+    <div
+      class="ghost-card"
+      style="left:{dragging.ghostX}px;top:{dragging.ghostY}px"
+    >
+      <div class="ghost-type">
+        {decks[selectedAgent][dragging.cardIndex]?.type === 'extract' ? 'EXTRACT' : 'DEPOSIT'}
+      </div>
+      <div class="ghost-target">
+        {#if decks[selectedAgent][dragging.cardIndex]?.target}
+          {decks[selectedAgent][dragging.cardIndex].target.emoji} {decks[selectedAgent][dragging.cardIndex].target.label}
+        {:else}
+          — assign target —
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Deck overlay (glassmorphism, floats above canvas) -->
+  <div class="deck-overlay">
+    <button class="deck-toggle" onclick={() => deckCollapsed = !deckCollapsed}>
+      {deckCollapsed ? '▲' : '▼'}
+    </button>
+
+    {#if !deckCollapsed}
+      <div class="deck-content">
+        <div class="agent-tabs">
+          {#each agents as _, ai}
+            <button
+              class="agent-tab"
+              class:active={selectedAgent === ai}
+              style="--agent-color: {AGENT_COLORS[ai]}"
+              onclick={() => selectedAgent = ai}
+            >
+              Agent {ai + 1}
+            </button>
+          {/each}
+        </div>
+
+        <div class="deck-row">
+          <div class="cards-scroll">
+            {#each decks[selectedAgent] as card, i}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="card"
+                class:card-active={agents[selectedAgent].cardIndex === i && (isPlaying || agents[selectedAgent].state !== 'IDLE')}
+                onmousedown={(e) => startDrag(i, e)}
+                ontouchstart={(e) => { e.preventDefault(); startDrag(i, e) }}
+              >
+                <button class="card-clear" onclick={(e) => clearTarget(i, e)}>×</button>
+                <div class="card-type">{card.type === 'extract' ? 'EXTRACT' : 'DEPOSIT'}</div>
+                {#if card.target}
+                  <div class="card-node">{card.target.emoji} {card.target.label}</div>
+                {:else}
+                  <div class="card-node no-target">— assign<br/>target —</div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+
+          <div class="ctrl-panel">
+            <button class="ctrl-btn" onclick={doPlay} disabled={isPlaying}>▶ Play</button>
+            <button class="ctrl-btn" onclick={doStop} disabled={!isPlaying}>⏹ Stop</button>
+            <button class="ctrl-btn" onclick={doReset}>↺ Reset</button>
+          </div>
         </div>
       </div>
     {/if}
-  </div>
-
-  <!-- Deck strip -->
-  <div class="deck-strip">
-    <div class="cards-scroll">
-      {#each deck as card, i}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="card"
-          class:card-active={agent.cardIndex === i && (isPlaying || agent.state !== 'IDLE')}
-          onmousedown={(e) => startDrag(i, e)}
-          ontouchstart={(e) => { e.preventDefault(); startDrag(i, e) }}
-        >
-          <button class="card-clear" onclick={(e) => clearTarget(i, e)}>×</button>
-          <div class="card-type">{card.type === 'extract' ? 'EXTRACT' : 'DEPOSIT'}</div>
-          {#if card.target}
-            <div class="card-node">{card.target.emoji} {card.target.label}</div>
-          {:else}
-            <div class="card-node no-target">— assign<br/>target —</div>
-          {/if}
-        </div>
-      {/each}
-    </div>
-
-    <div class="ctrl-panel">
-      <button class="ctrl-btn" onclick={doPlay} disabled={isPlaying}>▶ Play</button>
-      <button class="ctrl-btn" onclick={doStop} disabled={!isPlaying}>⏹ Stop</button>
-      <button class="ctrl-btn" onclick={doReset}>↺ Reset</button>
-    </div>
   </div>
 </div>
 
@@ -502,8 +545,6 @@
     position: relative;
     width: 100%;
     height: 100%;
-    display: flex;
-    flex-direction: column;
     background: #0a0a0a;
     overflow: hidden;
     font-family: monospace;
@@ -521,21 +562,16 @@
     z-index: 100;
   }
 
-  .map-area {
-    position: relative;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
-  }
-
-  .map-area canvas {
+  canvas {
     position: absolute;
     inset: 0;
     display: block;
+    width: 100%;
+    height: 100%;
     touch-action: none;
     cursor: grab;
   }
-  .map-area canvas:active {
+  canvas:active {
     cursor: grabbing;
   }
 
@@ -545,11 +581,12 @@
     left: 12px;
     background: rgba(0, 0, 0, 0.5);
     color: #fff;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     padding: 6px 12px;
     border-radius: 8px;
     pointer-events: none;
     z-index: 10;
+    white-space: nowrap;
   }
 
   .back-btn {
@@ -598,13 +635,69 @@
     color: #e8e8e8;
   }
 
-  .deck-strip {
-    flex-shrink: 0;
-    height: 180px;
-    background: #111;
-    border-top: 1px solid #333;
+  .deck-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(10, 10, 10, 0.88);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-top: 1px solid #222;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .deck-toggle {
+    align-self: center;
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 24px;
+    height: 32px;
+    line-height: 1;
+    transition: color 0.15s;
+  }
+  .deck-toggle:hover {
+    color: #e8e8e8;
+  }
+
+  .deck-content {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .agent-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 0 12px 6px;
+  }
+
+  .agent-tab {
+    padding: 4px 14px;
+    background: transparent;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #666;
+    font-family: monospace;
+    font-size: 12px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    min-height: 32px;
+  }
+  .agent-tab.active {
+    border-color: var(--agent-color);
+    color: var(--agent-color);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .deck-row {
     display: flex;
     align-items: center;
+    height: 136px;
     overflow: hidden;
   }
 
@@ -628,7 +721,7 @@
     background: #1a1a1a;
     border: 1px solid #333;
     border-radius: 10px;
-    padding: 8px 6px 8px 6px;
+    padding: 8px 6px;
     position: relative;
     cursor: grab;
     user-select: none;
@@ -690,29 +783,29 @@
 
   .ctrl-panel {
     flex-shrink: 0;
-    width: 160px;
+    width: 150px;
     display: flex;
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
     gap: 6px;
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-left: 1px solid #222;
     height: 100%;
     box-sizing: border-box;
   }
 
   .ctrl-btn {
-    padding: 9px 0;
+    padding: 8px 0;
     background: #1a1a1a;
     border: 1px solid #333;
     border-radius: 8px;
     color: #e8e8e8;
     font-family: monospace;
-    font-size: 14px;
+    font-size: 13px;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
-    min-height: 44px;
+    min-height: 38px;
   }
   .ctrl-btn:hover:not(:disabled) {
     background: #7c3aed;
