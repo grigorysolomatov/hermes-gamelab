@@ -1,9 +1,29 @@
 <script>
-  import { games, activeGame, showArchived } from './lib/store.js'
+  import { games } from './lib/store.js'
 
   let currentGame = $state(null)
   let leaving = $state(false)
   let entering = $state(false)
+
+  const STORAGE_KEY = 'hermes-gamelab-hidden'
+  let hiddenIds = $state(new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]')))
+  let hiddenExpanded = $state(false)
+
+  function persistHidden() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...hiddenIds]))
+  }
+
+  function hideGame(id) {
+    hiddenIds = new Set([...hiddenIds, id])
+    persistHidden()
+  }
+
+  function showGame(id) {
+    const next = new Set(hiddenIds)
+    next.delete(id)
+    hiddenIds = next
+    persistHidden()
+  }
 
   function launch(game) {
     entering = true
@@ -19,17 +39,8 @@
     }, 200)
   }
 
-  const categories = $derived.by(() => {
-    const visible = games.filter(g => $showArchived || !g.archived)
-    const cats = {}
-    for (const g of visible) {
-      if (!cats[g.category]) cats[g.category] = []
-      cats[g.category].push(g)
-    }
-    return cats
-  })
-
-  const hasArchived = games.some(g => g.archived)
+  const visibleGames = $derived(games.filter(g => !hiddenIds.has(g.id)))
+  const hiddenGames = $derived(games.filter(g => hiddenIds.has(g.id)))
 </script>
 
 {#if currentGame}
@@ -43,35 +54,44 @@
     </header>
 
     <main>
-      {#each Object.entries(categories) as [cat, list]}
-        <section>
-          <h2 class="cat-label">{cat}</h2>
-          <div class="grid">
-            {#each list as game}
+      <section>
+        <h2 class="cat-label">Games</h2>
+        <div class="grid">
+          {#each visibleGames as game}
+            <div class="card-wrap">
               <button class="card" onclick={() => launch(game)}>
                 <span class="card-title">{game.title}</span>
-                {#if game.archived}
-                  <span class="badge">archived</span>
-                {/if}
                 <span class="arrow">▶</span>
               </button>
-            {/each}
-          </div>
-        </section>
-      {/each}
-    </main>
+              <button
+                class="hide-btn"
+                onclick={() => hideGame(game.id)}
+                aria-label="Hide {game.title}"
+              >···</button>
+            </div>
+          {/each}
+        </div>
+      </section>
 
-    {#if hasArchived}
-      <footer>
-        <label class="toggle">
-          <input
-            type="checkbox"
-            bind:checked={$showArchived}
-          />
-          <span class="toggle-label">show archived</span>
-        </label>
-      </footer>
-    {/if}
+      {#if hiddenGames.length > 0}
+        <section>
+          <button class="hidden-header" onclick={() => (hiddenExpanded = !hiddenExpanded)}>
+            <span class="cat-label">Hidden ({hiddenGames.length})</span>
+            <span class="chevron" class:open={hiddenExpanded}>▾</span>
+          </button>
+          {#if hiddenExpanded}
+            <div class="grid">
+              {#each hiddenGames as game}
+                <div class="card card--hidden">
+                  <span class="card-title dimmed">{game.title}</span>
+                  <button class="show-btn" onclick={() => showGame(game.id)}>show</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {/if}
+    </main>
   </div>
 {/if}
 
@@ -135,12 +155,17 @@
     text-transform: uppercase;
     color: #555;
     margin-bottom: 12px;
+    display: block;
   }
 
   .grid {
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  .card-wrap {
+    position: relative;
   }
 
   .card {
@@ -167,6 +192,40 @@
     background: #1d1030;
   }
 
+  .card.card--hidden {
+    cursor: default;
+    background: #0d0d0d;
+    border-color: #1a1a1a;
+  }
+  .card.card--hidden:hover,
+  .card.card--hidden:focus-visible,
+  .card.card--hidden:active {
+    border-color: #1a1a1a;
+    background: #0d0d0d;
+    outline: none;
+  }
+
+  .hide-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    padding: 10px 14px;
+    background: transparent;
+    border: none;
+    color: #383838;
+    font-size: 16px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 0 10px 0 8px;
+    line-height: 1;
+    transition: color 0.15s, background 0.15s;
+    z-index: 1;
+  }
+  .hide-btn:hover {
+    color: #7c3aed;
+    background: rgba(124, 58, 237, 0.08);
+  }
+
   .card-title {
     flex: 1;
     font-size: 16px;
@@ -174,15 +233,8 @@
     color: #e8e8e8;
   }
 
-  .badge {
-    font-family: monospace;
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #555;
-    border: 1px solid #333;
-    border-radius: 4px;
-    padding: 2px 6px;
+  .dimmed {
+    color: #444;
   }
 
   .arrow {
@@ -191,51 +243,47 @@
     opacity: 0.8;
   }
 
-  footer {
-    margin-top: 40px;
-    display: flex;
-    justify-content: center;
-  }
-
-  .toggle {
+  .hidden-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    background: transparent;
+    border: none;
     cursor: pointer;
-    user-select: none;
+    padding: 0;
+    width: 100%;
+    color: inherit;
+    margin-bottom: 12px;
   }
-  .toggle input {
-    appearance: none;
-    width: 36px;
-    height: 20px;
-    background: #222;
-    border-radius: 10px;
-    position: relative;
-    cursor: pointer;
-    transition: background 0.2s;
+  .hidden-header .cat-label {
+    margin-bottom: 0;
   }
-  .toggle input::after {
-    content: '';
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #555;
-    transition: left 0.2s, background 0.2s;
-  }
-  .toggle input:checked {
-    background: #3b1f6e;
-  }
-  .toggle input:checked::after {
-    left: 19px;
-    background: #7c3aed;
-  }
-  .toggle-label {
-    font-family: monospace;
-    font-size: 13px;
+  .chevron {
     color: #555;
+    font-size: 14px;
+    transition: transform 0.18s;
+    display: block;
+  }
+  .chevron.open {
+    transform: rotate(180deg);
+  }
+
+  .show-btn {
+    font-family: monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #7c3aed;
+    background: transparent;
+    border: 1px solid #3b1f6e;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .show-btn:hover {
+    background: rgba(124, 58, 237, 0.12);
+    border-color: #7c3aed;
   }
 
   .fade-in {
