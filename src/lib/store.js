@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store'
 import FlappyGame from '../games/flappy/index.svelte'
 import CounterGame from '../games/counter/index.svelte'
+import AutomatonGame from '../games/automaton/index.svelte'
 
 export const games = [
   {
@@ -16,6 +17,13 @@ export const games = [
     category: 'casual',
     archived: false,
     component: CounterGame,
+  },
+  {
+    id: 'automaton',
+    title: 'Automaton',
+    category: 'strategy',
+    archived: false,
+    component: AutomatonGame,
   },
 ]
 
