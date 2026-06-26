@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=375, initial-scale=1">
+<title>Card Workers — Mobile Sketch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e8e8e8;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  /* === TOP BAR === */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #111;
+    border-bottom: 1px solid #222;
+    flex-shrink: 0;
+  }
+  .topbar .title { font-size: 13px; font-weight: 600; color: #e8e8e8; }
+  .topbar .resources { display: flex; gap: 12px; font-size: 12px; color: #aaa; }
+  .topbar .resources span { display: flex; align-items: center; gap: 4px; }
+  .topbar .resources .val { color: #e8e8e8; font-weight: 600; }
+
+  /* === WORKERS STRIP (horizontal scroll) === */
+  .workers-strip {
+    flex-shrink: 0;
+    background: #111;
+    border-bottom: 1px solid #222;
+    padding: 10px 14px;
+  }
+  .workers-label {
+    font-size: 10px; color: #555;
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .workers-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .worker-slot {
+    flex-shrink: 0;
+    width: 108px;
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 8px;
+    background: #161616;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .worker-slot.drag-over {
+    border-color: #7c3aed;
+    background: #1a1230;
+  }
+  .worker-header {
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+  }
+  .worker-avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+  .worker-name { font-size: 11px; color: #ccc; font-weight: 500; }
+  .worker-status { font-size: 9px; color: #555; }
+  .worker-queue { display: flex; flex-direction: column; gap: 3px; min-height: 24px; }
+  .queued-card {
+    background: #1e1e2e;
+    border: 1px solid #7c3aed55;
+    border-radius: 5px;
+    padding: 3px 7px;
+    font-size: 10px;
+    color: #c4b0ff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .queued-card .remove-btn {
+    color: #555; cursor: pointer; font-size: 12px; line-height: 1;
+    padding: 2px 3px;
+  }
+  .queued-card .remove-btn:active { color: #e8e8e8; }
+  .drop-hint {
+    border: 1px dashed #2a2a2a;
+    border-radius: 5px;
+    padding: 4px 6px;
+    font-size: 9px;
+    color: #444;
+    text-align: center;
+  }
+
+  /* === MAP (fills remaining space) === */
+  .map {
+    flex: 1;
+    position: relative;
+    background: #0d0d0d;
+    overflow: hidden;
+  }
+  .map-node {
+    position: absolute;
+    width: 60px; height: 60px;
+    border-radius: 10px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 2px; font-size: 10px; color: #888;
+  }
+  .map-node .icon { font-size: 20px; }
+  .map-node.base  { border-color: #7c3aed55; background: #1a1230; color: #c4b0ff; }
+  .map-node.forest{ border-color: #22553355; background: #0e1a12; color: #6dbe8a; }
+  .map-node.mine  { border-color: #55442255; background: #1a150e; color: #d4a56a; }
+  .map-edge { position: absolute; background: #2a2a2a; height: 2px; transform-origin: left center; border-radius: 2px; }
+
+  /* === HAND (bottom) === */
+  .hand-area {
+    flex-shrink: 0;
+    background: #111;
+    border-top: 1px solid #222;
+    padding: 10px 14px 12px;
+  }
+  .hand-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .hand-cards {
+    display: flex; gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .card {
+    flex-shrink: 0;
+    width: 72px; height: 100px;
+    border-radius: 9px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    padding: 7px 6px;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 4px;
+    cursor: grab;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    position: relative;
+    touch-action: none;
+  }
+  .card:active { transform: scale(1.06); }
+  .card.selected {
+    border-color: #7c3aed;
+    box-shadow: 0 4px 16px #7c3aed44;
+    transform: translateY(-6px);
+  }
+  .card.assigned { opacity: 0.45; border-color: #333; }
+  .card-icon { font-size: 22px; margin-top: 2px; }
+  .card-name { font-size: 10px; font-weight: 600; color: #e8e8e8; text-align: center; }
+  .card-desc { font-size: 8px; color: #666; text-align: center; line-height: 1.4; }
+  .card-type { position: absolute; bottom: 5px; font-size: 7px; color: #555; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* === PLAY BAR === */
+  .play-bar {
+    flex-shrink: 0;
+    background: #111;
+    border-top: 1px solid #1a1a1a;
+    padding: 8px 14px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .play-hint { font-size: 10px; color: #555; }
+  .play-btn {
+    background: #7c3aed; color: #fff;
+    border: none; border-radius: 8px;
+    padding: 9px 24px;
+    font-size: 13px; font-weight: 600;
+    cursor: pointer; letter-spacing: 0.04em;
+    min-width: 44px; min-height: 44px;
+    transition: background 0.15s;
+  }
+  .play-btn:active { background: #9157f5; }
+
+  /* === SELECTED-CARD BANNER === */
+  .assign-banner {
+    display: none;
+    position: fixed; top: 0; left: 0; right: 0;
+    background: #7c3aed;
+    color: #fff; font-size: 12px; font-weight: 500;
+    padding: 8px 14px;
+    text-align: center;
+    z-index: 50;
+  }
+  .assign-banner.visible { display: block; }
+</style>
+</head>
+<body>
+
+<div class="assign-banner" id="assign-banner">Tap a worker to assign</div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <span class="title">Card Workers</span>
+  <div class="resources">
+    <span>🌿 <span class="val">0</span></span>
+    <span>🪨 <span class="val">0</span></span>
+    <span>👷 <span class="val">3</span></span>
+  </div>
+</div>
+
+<!-- WORKERS STRIP -->
+<div class="workers-strip">
+  <div class="workers-label">Workers — tap to assign selected card</div>
+  <div class="workers-row">
+    <div class="worker-slot" id="worker-a" data-worker="a" onclick="assignToWorker('a')">
+      <div class="worker-header">
+        <div class="worker-avatar">🧑</div>
+        <div>
+          <div class="worker-name">Worker A</div>
+          <div class="worker-status">Idle</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-a">
+        <div class="drop-hint">Tap to assign</div>
+      </div>
+    </div>
+    <div class="worker-slot" id="worker-b" data-worker="b" onclick="assignToWorker('b')">
+      <div class="worker-header">
+        <div class="worker-avatar">👷</div>
+        <div>
+          <div class="worker-name">Worker B</div>
+          <div class="worker-status">Idle</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-b">
+        <div class="drop-hint">Tap to assign</div>
+      </div>
+    </div>
+    <div class="worker-slot" id="worker-c" data-worker="c" onclick="assignToWorker('c')">
+      <div class="worker-header">
+        <div class="worker-avatar">🧑‍🌾</div>
+        <div>
+          <div class="worker-name">Worker C</div>
+          <div class="worker-status">Idle</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-c">
+        <div class="drop-hint">Tap to assign</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MAP -->
+<div class="map" id="map">
+  <div class="map-edge" style="left:90px;top:70px;width:75px;transform:rotate(-20deg)"></div>
+  <div class="map-edge" style="left:90px;top:85px;width:80px;transform:rotate(18deg)"></div>
+  <div class="map-edge" style="left:230px;top:55px;width:70px;transform:rotate(22deg)"></div>
+
+  <div class="map-node base"   style="left:28px;top:52px;"><span class="icon">🏠</span><span>Base</span></div>
+  <div class="map-node forest" style="left:155px;top:28px;"><span class="icon">🌲</span><span>Forest</span></div>
+  <div class="map-node forest" style="left:165px;top:98px;"><span class="icon">🍄</span><span>Grove</span></div>
+  <div class="map-node mine"   style="left:278px;top:20px;"><span class="icon">⛏️</span><span>Mine</span></div>
+
+  <!-- Workers at base -->
+  <div style="position:absolute;left:36px;top:108px;display:flex;gap:4px;">
+    <div style="width:20px;height:20px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;">🧑</div>
+    <div style="width:20px;height:20px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;">👷</div>
+    <div style="width:20px;height:20px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;">🧑‍🌾</div>
+  </div>
+</div>
+
+<!-- HAND -->
+<div class="hand-area">
+  <div class="hand-label">Your hand — tap a card, then tap a worker</div>
+  <div class="hand-cards" id="hand">
+    <div class="card" id="card-forage"  data-card="Forage"  onclick="selectCard(this)">
+      <div class="card-icon">🍃</div>
+      <div class="card-name">Forage</div>
+      <div class="card-desc">Gather food from nearby</div>
+      <div class="card-type">action</div>
+    </div>
+    <div class="card" id="card-harvest" data-card="Harvest" onclick="selectCard(this)">
+      <div class="card-icon">🌾</div>
+      <div class="card-name">Harvest</div>
+      <div class="card-desc">Collect from closest node</div>
+      <div class="card-type">action</div>
+    </div>
+    <div class="card" id="card-rest"    data-card="Rest"    onclick="selectCard(this)">
+      <div class="card-icon">💤</div>
+      <div class="card-name">Rest</div>
+      <div class="card-desc">Recover at current spot</div>
+      <div class="card-type">passive</div>
+    </div>
+    <div class="card" id="card-move"    data-card="Move"    onclick="selectCard(this)">
+      <div class="card-icon">👣</div>
+      <div class="card-name">Move</div>
+      <div class="card-desc">Travel to next node</div>
+      <div class="card-type">movement</div>
+    </div>
+    <div class="card" id="card-mine"    data-card="Mine"    onclick="selectCard(this)">
+      <div class="card-icon">⛏️</div>
+      <div class="card-name">Mine</div>
+      <div class="card-desc">Extract ore at mine</div>
+      <div class="card-type">action</div>
+    </div>
+  </div>
+</div>
+
+<!-- PLAY BAR -->
+<div class="play-bar">
+  <span class="play-hint" id="play-hint">Select a card to start</span>
+  <button class="play-btn" id="play-btn" onclick="pressPlay()">▶ Play</button>
+</div>
+
+<script>
+  let selectedCard = null;
+  const assignments = {}; // cardId -> workerId
+
+  function selectCard(el) {
+    if (el.classList.contains('assigned')) return;
+    // Deselect if already selected
+    if (selectedCard === el) {
+      el.classList.remove('selected');
+      selectedCard = null;
+      document.getElementById('assign-banner').classList.remove('visible');
+      updatePlayHint();
+      return;
+    }
+    if (selectedCard) selectedCard.classList.remove('selected');
+    selectedCard = el;
+    el.classList.add('selected');
+    document.getElementById('assign-banner').classList.add('visible');
+    document.getElementById('play-hint').textContent = 'Now tap a worker ↑';
+  }
+
+  function assignToWorker(workerId) {
+    if (!selectedCard) return;
+    const cardId = selectedCard.id;
+    const cardName = selectedCard.dataset.card;
+
+    // Remove from previous worker if already assigned
+    if (assignments[cardId]) {
+      removeFromQueue(cardId, assignments[cardId]);
+    }
+    assignments[cardId] = workerId;
+
+    const queue = document.getElementById('queue-' + workerId);
+    const hint = queue.querySelector('.drop-hint');
+    if (hint) hint.remove();
+
+    const item = document.createElement('div');
+    item.className = 'queued-card';
+    item.dataset.cardId = cardId;
+    item.innerHTML = `<span>${cardName}</span><span class="remove-btn" onclick="event.stopPropagation();unassign('${cardId}','${workerId}')">✕</span>`;
+    queue.appendChild(item);
+
+    // Mark card as assigned
+    selectedCard.classList.remove('selected');
+    selectedCard.classList.add('assigned');
+    selectedCard = null;
+    document.getElementById('assign-banner').classList.remove('visible');
+    updatePlayHint();
+  }
+
+  function unassign(cardId, workerId) {
+    removeFromQueue(cardId, workerId);
+    delete assignments[cardId];
+    const cardEl = document.getElementById(cardId);
+    if (cardEl) cardEl.classList.remove('assigned');
+    updatePlayHint();
+  }
+
+  function removeFromQueue(cardId, workerId) {
+    const queue = document.getElementById('queue-' + workerId);
+    const item = queue.querySelector(`[data-card-id="${cardId}"]`);
+    if (item) item.remove();
+    if (queue.children.length === 0) {
+      queue.innerHTML = '<div class="drop-hint">Tap to assign</div>';
+    }
+  }
+
+  function updatePlayHint() {
+    const count = Object.keys(assignments).length;
+    const hint = document.getElementById('play-hint');
+    if (count === 0) hint.textContent = 'Select a card to start';
+    else hint.textContent = `${count} card${count > 1 ? 's' : ''} assigned — ready`;
+  }
+
+  function pressPlay() {
+    const count = Object.keys(assignments).length;
+    if (count === 0) {
+      document.getElementById('play-hint').textContent = '⚠️ No cards assigned!';
+      return;
+    }
+    document.getElementById('play-btn').textContent = '⏸ Running…';
+    document.getElementById('play-btn').style.background = '#333';
+    document.getElementById('play-hint').textContent = 'Workers executing…';
+  }
+</script>
+</body>
+</html>

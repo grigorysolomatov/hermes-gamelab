@@ -166,6 +166,19 @@ A Mini Metro-style idle/automation game where the player programs agents with ca
 ### On card design
 Current primitives (Extract, Deposit) are good. A third card type that enables *interaction between agents or nodes* would multiply the design space enormously (e.g. Craft, Transfer, Move, Conditional).
 
+## Frozen / Backlog (not actively being worked on)
+
+### Automaton — layout rework (frozen 2026-06-26)
+- Portrait mode (remove landscape-only restriction)
+- Semi-transparent card panel, map visible behind it
+- Card rows: max 4 per row, 1–2 rows
+- Smooth deck toggle animation
+
+### Framework-wide (backlog)
+- Smooth transitions everywhere — menus, panels, game cards should fade/slide rather than snap
+
+---
+
 ## Open Questions / Future Decisions
 
 - **Loss condition** — what kills the run? Options: timer, resource debt/taxes, node depletion, environmental hazard. Should feel telegraphed and fair.

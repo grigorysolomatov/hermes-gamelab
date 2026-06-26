@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Workers — Round Start Sketch</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #e8e8e8;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* === TOP BAR === */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    background: #111;
+    border-bottom: 1px solid #222;
+    flex-shrink: 0;
+  }
+  .topbar .title { font-size: 13px; color: #888; letter-spacing: 0.08em; text-transform: uppercase; }
+  .topbar .round-info { font-size: 13px; color: #e8e8e8; }
+  .topbar .resources { display: flex; gap: 16px; font-size: 13px; color: #aaa; }
+  .topbar .resources span { display: flex; align-items: center; gap: 5px; }
+  .topbar .resources .val { color: #e8e8e8; font-weight: 600; }
+
+  /* === MAIN AREA (map + workers) === */
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* === MAP === */
+  .map {
+    flex: 1;
+    position: relative;
+    background: #0d0d0d;
+    overflow: hidden;
+  }
+  .map-node {
+    position: absolute;
+    width: 72px;
+    height: 72px;
+    border-radius: 12px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 11px;
+    color: #888;
+    cursor: default;
+  }
+  .map-node .icon { font-size: 22px; }
+  .map-node.base { border-color: #7c3aed55; background: #1a1230; color: #c4b0ff; }
+  .map-node.forest { border-color: #22553355; background: #0e1a12; color: #6dbe8a; }
+  .map-node.mine { border-color: #55442255; background: #1a150e; color: #d4a56a; }
+  .map-edge {
+    position: absolute;
+    background: #2a2a2a;
+    height: 2px;
+    transform-origin: left center;
+    border-radius: 2px;
+  }
+
+  /* === WORKERS PANEL === */
+  .workers-panel {
+    width: 200px;
+    background: #111;
+    border-left: 1px solid #222;
+    display: flex;
+    flex-direction: column;
+    padding: 12px 10px;
+    gap: 10px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .workers-label {
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 0 2px 4px;
+    border-bottom: 1px solid #1e1e1e;
+  }
+  .worker-slot {
+    border: 1px solid #222;
+    border-radius: 10px;
+    padding: 10px;
+    background: #161616;
+    transition: border-color 0.15s;
+  }
+  .worker-slot.drag-over {
+    border-color: #7c3aed;
+    background: #1a1230;
+  }
+  .worker-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .worker-avatar {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: #2a2a2a;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  .worker-name { font-size: 12px; color: #ccc; font-weight: 500; }
+  .worker-status { font-size: 10px; color: #555; }
+  .worker-queue {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 28px;
+  }
+  .queued-card {
+    background: #1e1e2e;
+    border: 1px solid #7c3aed55;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 11px;
+    color: #c4b0ff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .queued-card .remove-btn {
+    color: #555;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .queued-card .remove-btn:hover { color: #e8e8e8; }
+  .drop-hint {
+    border: 1px dashed #2a2a2a;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 10px;
+    color: #444;
+    text-align: center;
+  }
+
+  /* === HAND (bottom) === */
+  .hand-area {
+    flex-shrink: 0;
+    background: #111;
+    border-top: 1px solid #222;
+    padding: 12px 20px 16px;
+  }
+  .hand-label {
+    font-size: 10px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+  .hand-cards {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .card {
+    flex-shrink: 0;
+    width: 90px;
+    height: 120px;
+    border-radius: 10px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: grab;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    position: relative;
+  }
+  .card:hover {
+    transform: translateY(-8px);
+    border-color: #7c3aed;
+    box-shadow: 0 8px 24px #7c3aed33;
+    z-index: 10;
+  }
+  .card.dragging {
+    opacity: 0.4;
+    transform: translateY(-8px);
+    cursor: grabbing;
+  }
+  .card-icon { font-size: 28px; margin-top: 4px; }
+  .card-name { font-size: 11px; font-weight: 600; color: #e8e8e8; text-align: center; }
+  .card-desc { font-size: 9px; color: #666; text-align: center; line-height: 1.4; }
+  .card-type {
+    position: absolute;
+    bottom: 7px;
+    font-size: 8px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* === PLAY BUTTON === */
+  .play-bar {
+    flex-shrink: 0;
+    background: #111;
+    border-top: 1px solid #222;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .play-hint { font-size: 11px; color: #555; }
+  .play-btn {
+    background: #7c3aed;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 28px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: background 0.15s, transform 0.1s;
+  }
+  .play-btn:hover { background: #9157f5; transform: scale(1.03); }
+  .play-btn:active { transform: scale(0.98); }
+
+  /* === DRAG GHOST === */
+  .drag-ghost {
+    position: fixed;
+    pointer-events: none;
+    width: 90px;
+    height: 120px;
+    border-radius: 10px;
+    border: 1px solid #7c3aed;
+    background: #1a1230;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 10px 8px; gap: 6px;
+    opacity: 0.9;
+    z-index: 1000;
+    box-shadow: 0 8px 32px #7c3aed55;
+    display: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <span class="title">Card Workers</span>
+  <span class="round-info">Round 1 — Assign cards, then press Play</span>
+  <div class="resources">
+    <span>🌿 <span class="val">0</span></span>
+    <span>🪨 <span class="val">0</span></span>
+    <span>⚙️ <span class="val">3</span> workers</span>
+  </div>
+</div>
+
+<!-- MAIN: MAP + WORKERS -->
+<div class="main">
+  <!-- MAP -->
+  <div class="map" id="map">
+    <!-- Edges (drawn as rotated divs) -->
+    <div class="map-edge" style="left:178px;top:140px;width:90px;transform:rotate(25deg)"></div>
+    <div class="map-edge" style="left:178px;top:180px;width:110px;transform:rotate(-20deg)"></div>
+    <div class="map-edge" style="left:340px;top:120px;width:95px;transform:rotate(30deg)"></div>
+
+    <!-- Nodes -->
+    <div class="map-node base" style="left:110px;top:130px;">
+      <span class="icon">🏠</span>
+      <span>Base</span>
+    </div>
+    <div class="map-node forest" style="left:280px;top:80px;">
+      <span class="icon">🌲</span>
+      <span>Forest</span>
+    </div>
+    <div class="map-node forest" style="left:300px;top:200px;">
+      <span class="icon">🍄</span>
+      <span>Grove</span>
+    </div>
+    <div class="map-node mine" style="left:430px;top:70px;">
+      <span class="icon">⛏️</span>
+      <span>Mine</span>
+    </div>
+
+    <!-- Workers on map (idle at base) -->
+    <div style="position:absolute;left:125px;top:170px;display:flex;gap:5px;">
+      <div style="width:22px;height:22px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;" title="Worker A">🧑</div>
+      <div style="width:22px;height:22px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;" title="Worker B">👷</div>
+      <div style="width:22px;height:22px;background:#2a2a3a;border:1px solid #7c3aed44;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;" title="Worker C">🧑‍🌾</div>
+    </div>
+  </div>
+
+  <!-- WORKERS PANEL -->
+  <div class="workers-panel">
+    <div class="workers-label">Workers</div>
+
+    <!-- Worker A -->
+    <div class="worker-slot" id="worker-a" data-worker="a"
+         ondragover="handleDragOver(event,this)" ondragleave="handleDragLeave(event,this)" ondrop="handleDrop(event,this)">
+      <div class="worker-header">
+        <div class="worker-avatar">🧑</div>
+        <div>
+          <div class="worker-name">Worker A</div>
+          <div class="worker-status">Idle at Base</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-a">
+        <div class="drop-hint">Drop cards here</div>
+      </div>
+    </div>
+
+    <!-- Worker B -->
+    <div class="worker-slot" id="worker-b" data-worker="b"
+         ondragover="handleDragOver(event,this)" ondragleave="handleDragLeave(event,this)" ondrop="handleDrop(event,this)">
+      <div class="worker-header">
+        <div class="worker-avatar">👷</div>
+        <div>
+          <div class="worker-name">Worker B</div>
+          <div class="worker-status">Idle at Base</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-b">
+        <div class="drop-hint">Drop cards here</div>
+      </div>
+    </div>
+
+    <!-- Worker C -->
+    <div class="worker-slot" id="worker-c" data-worker="c"
+         ondragover="handleDragOver(event,this)" ondragleave="handleDragLeave(event,this)" ondrop="handleDrop(event,this)">
+      <div class="worker-header">
+        <div class="worker-avatar">🧑‍🌾</div>
+        <div>
+          <div class="worker-name">Worker C</div>
+          <div class="worker-status">Idle at Base</div>
+        </div>
+      </div>
+      <div class="worker-queue" id="queue-c">
+        <div class="drop-hint">Drop cards here</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- HAND -->
+<div class="hand-area">
+  <div class="hand-label">Your Hand — drag a card onto a worker</div>
+  <div class="hand-cards" id="hand">
+    <div class="card" draggable="true" id="card-forage" data-card="Forage" ondragstart="dragStart(event,this)" ondragend="dragEnd(event,this)">
+      <div class="card-icon">🍃</div>
+      <div class="card-name">Forage</div>
+      <div class="card-desc">Gather food from a nearby resource node</div>
+      <div class="card-type">action</div>
+    </div>
+    <div class="card" draggable="true" id="card-harvest" data-card="Harvest" ondragstart="dragStart(event,this)" ondragend="dragEnd(event,this)">
+      <div class="card-icon">🌾</div>
+      <div class="card-name">Harvest</div>
+      <div class="card-desc">Collect materials from the closest node</div>
+      <div class="card-type">action</div>
+    </div>
+    <div class="card" draggable="true" id="card-rest" data-card="Rest" ondragstart="dragStart(event,this)" ondragend="dragEnd(event,this)">
+      <div class="card-icon">💤</div>
+      <div class="card-name">Rest</div>
+      <div class="card-desc">Recover stamina at current position</div>
+      <div class="card-type">passive</div>
+    </div>
+    <div class="card" draggable="true" id="card-move" data-card="Move" ondragstart="dragStart(event,this)" ondragend="dragEnd(event,this)">
+      <div class="card-icon">👣</div>
+      <div class="card-name">Move</div>
+      <div class="card-desc">Travel to the next node on the path</div>
+      <div class="card-type">movement</div>
+    </div>
+    <div class="card" draggable="true" id="card-mine" data-card="Mine" ondragstart="dragStart(event,this)" ondragend="dragEnd(event,this)">
+      <div class="card-icon">⛏️</div>
+      <div class="card-name">Mine</div>
+      <div class="card-desc">Extract ore if at a mine node</div>
+      <div class="card-type">action</div>
+    </div>
+  </div>
+</div>
+
+<!-- PLAY BAR -->
+<div class="play-bar">
+  <span class="play-hint" id="play-hint">Assign at least one card to play</span>
+  <button class="play-btn" id="play-btn" onclick="pressPlay()">▶ Play</button>
+</div>
+
+<script>
+  let draggedCard = null;
+  // track which worker each card is assigned to
+  const assignments = {}; // cardId -> workerId
+
+  function dragStart(e, el) {
+    draggedCard = el;
+    el.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', el.id);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function dragEnd(e, el) {
+    el.classList.remove('dragging');
+    draggedCard = null;
+    document.querySelectorAll('.worker-slot').forEach(s => s.classList.remove('drag-over'));
+  }
+
+  function handleDragOver(e, slot) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    slot.classList.add('drag-over');
+  }
+
+  function handleDragLeave(e, slot) {
+    slot.classList.remove('drag-over');
+  }
+
+  function handleDrop(e, slot) {
+    e.preventDefault();
+    slot.classList.remove('drag-over');
+    const cardId = e.dataTransfer.getData('text/plain');
+    const cardEl = document.getElementById(cardId);
+    if (!cardEl) return;
+    const workerId = slot.dataset.worker;
+    assignCard(cardId, cardEl.dataset.card, workerId);
+  }
+
+  function assignCard(cardId, cardName, workerId) {
+    // Remove from previous worker if already assigned
+    if (assignments[cardId]) {
+      removeFromQueue(cardId, assignments[cardId]);
+    }
+    assignments[cardId] = workerId;
+
+    const queue = document.getElementById('queue-' + workerId);
+    // Remove drop hint if present
+    const hint = queue.querySelector('.drop-hint');
+    if (hint) hint.remove();
+
+    const item = document.createElement('div');
+    item.className = 'queued-card';
+    item.dataset.cardId = cardId;
+    item.innerHTML = `<span>${cardName}</span><span class="remove-btn" onclick="unassign('${cardId}','${workerId}')">✕</span>`;
+    queue.appendChild(item);
+
+    updatePlayHint();
+  }
+
+  function unassign(cardId, workerId) {
+    removeFromQueue(cardId, workerId);
+    delete assignments[cardId];
+    updatePlayHint();
+  }
+
+  function removeFromQueue(cardId, workerId) {
+    const queue = document.getElementById('queue-' + workerId);
+    const item = queue.querySelector(`[data-card-id="${cardId}"]`);
+    if (item) item.remove();
+    if (queue.children.length === 0) {
+      queue.innerHTML = '<div class="drop-hint">Drop cards here</div>';
+    }
+  }
+
+  function updatePlayHint() {
+    const count = Object.keys(assignments).length;
+    const hint = document.getElementById('play-hint');
+    if (count === 0) {
+      hint.textContent = 'Assign at least one card to play';
+    } else {
+      hint.textContent = `${count} card${count > 1 ? 's' : ''} assigned — ready to play`;
+    }
+  }
+
+  function pressPlay() {
+    const count = Object.keys(assignments).length;
+    if (count === 0) {
+      document.getElementById('play-hint').textContent = '⚠️ No cards assigned yet!';
+      return;
+    }
+    document.getElementById('play-btn').textContent = '▶ Running...';
+    document.getElementById('play-btn').style.background = '#333';
+    document.getElementById('play-hint').textContent = 'Workers are executing their cards…';
+  }
+</script>
+</body>
+</html>
