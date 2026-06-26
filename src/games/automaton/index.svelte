@@ -9,8 +9,9 @@
   const INV_CAP = 5
   const ZOOM_MIN = 0.4
   const ZOOM_MAX = 2.0
-  const AGENT_COLORS = ['#ffffff', '#00bcd4', '#ff9800']
+  const AGENT_COLORS = ['#c084fc', '#22d3ee', '#fb923c']
   const NODE_RESOURCE = { mine: 'gold', rock: 'stone', tree: 'wood' }
+  const FAIL_FLASH_DURATION = 0.5
 
   // ---- DOM refs ----
   let canvasEl
@@ -27,7 +28,7 @@
   let nodes = $state([])
 
   function makeAgent() {
-    return { x: 0, y: 0, state: 'IDLE', cardIndex: 0, inventory: { gold: 0, wood: 0, stone: 0 }, workTimer: 0 }
+    return { x: 0, y: 0, state: 'IDLE', cardIndex: 0, inventory: { gold: 0, wood: 0, stone: 0 }, workTimer: 0, failFlash: 0 }
   }
 
   let agents = $state([makeAgent(), makeAgent(), makeAgent()])
@@ -40,11 +41,10 @@
 
   let baseResources = $state({ gold: 0, wood: 0, stone: 0 })
   let isPlaying = $state(false)
-  let dragging = $state(null) // { cardIndex, ghostX, ghostY }
+  let dragging = $state(null)
   let selectedAgent = $state(0)
   let deckCollapsed = $state(false)
 
-  // ---- Non-reactive interaction refs ----
   let panRef = { active: false, startX: 0, startY: 0, camX: 0, camY: 0 }
   let pinchRef = { active: false, startDist: 0, startZoom: 1 }
   let onResize
@@ -123,10 +123,28 @@
     const W = canvasEl.width
     const H = canvasEl.height
 
-    ctx.fillStyle = '#1a2a3a'
+    // Water: radial gradient for depth
+    const waterGrad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75)
+    waterGrad.addColorStop(0, '#1d3348')
+    waterGrad.addColorStop(1, '#0f1a24')
+    ctx.fillStyle = waterGrad
     ctx.fillRect(0, 0, W, H)
 
     if (islandPoly.length) {
+      // Beach ring: slightly scaled-up island polygon
+      ctx.beginPath()
+      const BEACH_SCALE = 1.05
+      const [bfx, bfy] = w2s(islandPoly[0].x * BEACH_SCALE, islandPoly[0].y * BEACH_SCALE)
+      ctx.moveTo(bfx, bfy)
+      for (let i = 1; i < islandPoly.length; i++) {
+        const [bsx, bsy] = w2s(islandPoly[i].x * BEACH_SCALE, islandPoly[i].y * BEACH_SCALE)
+        ctx.lineTo(bsx, bsy)
+      }
+      ctx.closePath()
+      ctx.fillStyle = '#7a6a48'
+      ctx.fill()
+
+      // Island with radial gradient (lighter center = elevation)
       ctx.beginPath()
       const [fx, fy] = w2s(islandPoly[0].x, islandPoly[0].y)
       ctx.moveTo(fx, fy)
@@ -135,27 +153,55 @@
         ctx.lineTo(sx, sy)
       }
       ctx.closePath()
-      ctx.fillStyle = '#2d3a2d'
+      const [icx, icy] = w2s(0, 0)
+      const iGrad = ctx.createRadialGradient(icx, icy, 0, icx, icy, 300 * cam.zoom)
+      iGrad.addColorStop(0, '#3b4c3b')
+      iGrad.addColorStop(1, '#263026')
+      ctx.fillStyle = iGrad
       ctx.fill()
     }
 
+    // Dragging context for node highlight logic
     const isDragging = dragging !== null
+    const draggingCard = isDragging ? decks[selectedAgent][dragging.cardIndex] : null
+    const isDepositDrag = draggingCard?.type === 'deposit'
+
+    ctx.shadowBlur = 0
+    ctx.shadowColor = 'transparent'
+
     for (const node of nodes) {
       const [sx, sy] = w2s(node.x, node.y)
       const r = node.radius * cam.zoom
+      // Deposit drags: only Base is a valid target
+      const isValidTarget = !isDepositDrag || node.type === 'base'
 
-      if (isDragging) {
+      if (isDragging && isValidTarget) {
+        ctx.shadowBlur = 0
         ctx.beginPath()
-        ctx.arc(sx, sy, r + 7, 0, Math.PI * 2)
+        ctx.arc(sx, sy, r + 9, 0, Math.PI * 2)
         ctx.strokeStyle = '#7c3aed'
         ctx.lineWidth = 2.5
         ctx.stroke()
       }
 
+      // Drop shadow
+      ctx.shadowBlur = 14
+      ctx.shadowColor = node.color + '88'
+
       ctx.beginPath()
       ctx.arc(sx, sy, r, 0, Math.PI * 2)
       ctx.fillStyle = node.color
       ctx.fill()
+
+      ctx.shadowBlur = 0
+      ctx.shadowColor = 'transparent'
+
+      // Top-arc highlight for 3D feel
+      ctx.beginPath()
+      ctx.arc(sx, sy, r * 0.78, -Math.PI * 0.78, -Math.PI * 0.18)
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)'
+      ctx.lineWidth = Math.max(1.5, r * 0.14)
+      ctx.stroke()
 
       ctx.font = `${Math.max(14, r * 1.1)}px sans-serif`
       ctx.textAlign = 'center'
@@ -163,28 +209,53 @@
       ctx.fillText(node.emoji, sx, sy)
 
       ctx.font = `${Math.max(9, 11 * cam.zoom)}px monospace`
-      ctx.fillStyle = 'rgba(255,255,255,0.75)'
+      ctx.fillStyle = 'rgba(255,255,255,0.72)'
       ctx.textBaseline = 'top'
-      ctx.fillText(node.label, sx, sy + r + 3)
+      ctx.fillText(node.label, sx, sy + r + 4)
     }
 
+    // Agents
     for (let ai = 0; ai < agents.length; ai++) {
       const ag = agents[ai]
       const [ax, ay] = w2s(ag.x, ag.y)
-      const agR = Math.max(6, 10 * cam.zoom)
+      const agR = Math.max(7, 11 * cam.zoom)
       const color = AGENT_COLORS[ai]
 
-      ctx.beginPath()
-      ctx.arc(ax, ay, agR + 5, -Math.PI / 2, Math.PI * 1.5)
-      ctx.strokeStyle = '#7c3aed'
-      ctx.lineWidth = 2
-      ctx.stroke()
+      // Soft glow behind agent
+      ctx.shadowBlur = 18
+      ctx.shadowColor = color
 
       ctx.beginPath()
       ctx.arc(ax, ay, agR, 0, Math.PI * 2)
       ctx.fillStyle = color
       ctx.fill()
 
+      ctx.shadowBlur = 0
+      ctx.shadowColor = 'transparent'
+
+      // Progress ring
+      ctx.beginPath()
+      ctx.arc(ax, ay, agR + 5, -Math.PI / 2, Math.PI * 1.5)
+      ctx.strokeStyle = 'rgba(124,58,237,0.65)'
+      ctx.lineWidth = 1.8
+      ctx.stroke()
+
+      // Fail flash: red ring + ✗ badge
+      if (ag.failFlash > 0) {
+        const alpha = ag.failFlash / FAIL_FLASH_DURATION
+        ctx.beginPath()
+        ctx.arc(ax, ay, agR + 9, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(239,68,68,${alpha})`
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        ctx.font = 'bold 13px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = `rgba(239,68,68,${alpha})`
+        ctx.fillText('✗', ax + agR + 6, ay - agR - 3)
+      }
+
+      // Inventory badge
       const total = inventoryTotal(ag.inventory)
       if (total > 0) {
         const bx = ax
@@ -196,7 +267,7 @@
         const tw = ctx.measureText(text).width
         const pw = tw + 10
         const ph = 16
-        ctx.fillStyle = 'rgba(0,0,0,0.8)'
+        ctx.fillStyle = 'rgba(0,0,0,0.85)'
         ctx.beginPath()
         if (ctx.roundRect) {
           ctx.roundRect(bx - pw / 2, by - ph / 2, pw, ph, 8)
@@ -218,6 +289,10 @@
       for (let ai = 0; ai < agents.length; ai++) {
         updateAgent(ai, dt)
       }
+    }
+    // Fade fail flash even when paused
+    for (const ag of agents) {
+      if (ag.failFlash > 0) ag.failFlash = Math.max(0, ag.failFlash - dt)
     }
     draw()
     raf = requestAnimationFrame(tick)
@@ -273,12 +348,17 @@
             ag.inventory = { ...ag.inventory, [resource]: ag.inventory[resource] + 1 }
           }
         } else if (card?.type === 'deposit') {
-          baseResources = {
-            gold: baseResources.gold + ag.inventory.gold,
-            wood: baseResources.wood + ag.inventory.wood,
-            stone: baseResources.stone + ag.inventory.stone,
+          if (card.target?.type === 'base') {
+            baseResources = {
+              gold: baseResources.gold + ag.inventory.gold,
+              wood: baseResources.wood + ag.inventory.wood,
+              stone: baseResources.stone + ag.inventory.stone,
+            }
+            ag.inventory = { gold: 0, wood: 0, stone: 0 }
+          } else {
+            // Non-base deposit target: silently fail with flash
+            ag.failFlash = FAIL_FLASH_DURATION
           }
-          ag.inventory = { gold: 0, wood: 0, stone: 0 }
         }
         ag.cardIndex = (ag.cardIndex + 1) % dk.length
         ag.state = 'IDLE'
@@ -397,6 +477,11 @@
     if (hitNode) {
       const idx = dragging.cardIndex
       const ai = selectedAgent
+      const card = decks[ai][idx]
+      // Deposit cards can only be assigned to the Base node
+      if (card?.type === 'deposit' && hitNode.type !== 'base') {
+        dragging = null; return
+      }
       decks = decks.map((dk, di) => di === ai ? dk.map((c, i) => i === idx ? { ...c, target: hitNode } : c) : dk)
     }
     dragging = null
@@ -464,7 +549,9 @@
   ></canvas>
 
   <div class="hud">
-    🪙 {baseResources.gold}&nbsp;&nbsp;🪵 {baseResources.wood}&nbsp;&nbsp;🪨 {baseResources.stone}
+    <span class="res-pill gold">🪙 {baseResources.gold}</span>
+    <span class="res-pill wood">🪵 {baseResources.wood}</span>
+    <span class="res-pill stone">🪨 {baseResources.stone}</span>
   </div>
 
   <button class="back-btn" onclick={onBack}>← back</button>
@@ -487,7 +574,6 @@
     </div>
   {/if}
 
-  <!-- Deck overlay (glassmorphism, floats above canvas) -->
   <div class="deck-overlay">
     <button class="deck-toggle" onclick={() => deckCollapsed = !deckCollapsed}>
       {deckCollapsed ? '▲' : '▼'}
@@ -515,15 +601,23 @@
               <div
                 class="card"
                 class:card-active={agents[selectedAgent].cardIndex === i && (isPlaying || agents[selectedAgent].state !== 'IDLE')}
+                class:card-deposit={card.type === 'deposit'}
                 onmousedown={(e) => startDrag(i, e)}
                 ontouchstart={(e) => { e.preventDefault(); startDrag(i, e) }}
               >
                 <button class="card-clear" onclick={(e) => clearTarget(i, e)}>×</button>
                 <div class="card-type">{card.type === 'extract' ? 'EXTRACT' : 'DEPOSIT'}</div>
+                <div class="card-divider"></div>
                 {#if card.target}
-                  <div class="card-node">{card.target.emoji} {card.target.label}</div>
+                  <div class="card-node">
+                    <span class="card-emoji">{card.target.emoji}</span>
+                    <span class="card-node-label">{card.target.label}</span>
+                  </div>
                 {:else}
-                  <div class="card-node no-target">— assign<br/>target —</div>
+                  <div class="card-node no-target">
+                    <span>drag to</span>
+                    <span>assign</span>
+                  </div>
                 {/if}
               </div>
             {/each}
@@ -579,23 +673,55 @@
     position: absolute;
     top: 12px;
     left: 12px;
-    background: rgba(0, 0, 0, 0.5);
-    color: #fff;
-    font-size: 1.1rem;
-    padding: 6px 12px;
-    border-radius: 8px;
+    display: flex;
+    gap: 6px;
     pointer-events: none;
     z-index: 10;
+  }
+
+  .res-pill {
+    display: inline-block;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #d4d4d8;
+    font-size: 0.88rem;
+    font-family: monospace;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    letter-spacing: 0.02em;
     white-space: nowrap;
+  }
+
+  .res-pill.gold {
+    border-color: rgba(201, 162, 39, 0.5);
+    background: rgba(201, 162, 39, 0.14);
+    color: #f0d070;
+  }
+
+  .res-pill.wood {
+    border-color: rgba(74, 124, 78, 0.5);
+    background: rgba(74, 124, 78, 0.14);
+    color: #7ec882;
+  }
+
+  .res-pill.stone {
+    border-color: rgba(150, 150, 150, 0.35);
+    background: rgba(130, 130, 130, 0.12);
+    color: #bbb;
   }
 
   .back-btn {
     position: absolute;
     top: 12px;
     right: 12px;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     border: 1px solid #333;
-    color: #888;
+    color: #777;
     font-family: monospace;
     font-size: 14px;
     padding: 6px 14px;
@@ -611,28 +737,30 @@
 
   .ghost-card {
     position: fixed;
-    width: 72px;
-    background: #1a1a1a;
+    width: 82px;
+    background: linear-gradient(155deg, #1e1e30 0%, #151522 100%);
     border: 1px solid #7c3aed;
-    border-radius: 10px;
-    padding: 8px 6px;
+    border-radius: 12px;
+    padding: 10px 8px;
     pointer-events: none;
-    opacity: 0.88;
+    opacity: 0.92;
     z-index: 200;
     transform: translate(-50%, -50%);
     text-align: center;
-    box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+    box-shadow: 0 0 18px rgba(124, 58, 237, 0.5), inset 0 1px 0 rgba(255,255,255,0.07);
   }
   .ghost-type {
-    font-size: 9px;
-    letter-spacing: 0.08em;
-    color: #aaa;
+    font-size: 8px;
+    letter-spacing: 0.14em;
+    color: #a78bfa;
     text-transform: uppercase;
-    margin-bottom: 6px;
+    font-weight: 700;
+    margin-bottom: 8px;
   }
   .ghost-target {
     font-size: 10px;
-    color: #e8e8e8;
+    color: #d4d4d8;
+    line-height: 1.4;
   }
 
   .deck-overlay {
@@ -640,10 +768,10 @@
     bottom: 0;
     left: 0;
     right: 0;
-    background: rgba(10, 10, 10, 0.88);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border-top: 1px solid #222;
+    background: rgba(8, 8, 14, 0.93);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     z-index: 20;
     display: flex;
     flex-direction: column;
@@ -653,11 +781,11 @@
     align-self: center;
     background: transparent;
     border: none;
-    color: #666;
-    font-size: 14px;
+    color: #4a4a5a;
+    font-size: 13px;
     cursor: pointer;
     padding: 4px 24px;
-    height: 32px;
+    height: 26px;
     line-height: 1;
     transition: color 0.15s;
   }
@@ -673,15 +801,15 @@
   .agent-tabs {
     display: flex;
     gap: 6px;
-    padding: 0 12px 6px;
+    padding: 0 12px 8px;
   }
 
   .agent-tab {
     padding: 4px 14px;
     background: transparent;
-    border: 1px solid #333;
+    border: 1px solid #252530;
     border-radius: 6px;
-    color: #666;
+    color: #4a4a5a;
     font-family: monospace;
     font-size: 12px;
     cursor: pointer;
@@ -697,7 +825,7 @@
   .deck-row {
     display: flex;
     align-items: center;
-    height: 136px;
+    height: 148px;
     overflow: hidden;
   }
 
@@ -711,25 +839,25 @@
     overflow-y: hidden;
     height: 100%;
     scrollbar-width: thin;
-    scrollbar-color: #333 transparent;
+    scrollbar-color: #252530 transparent;
   }
 
   .card {
     flex-shrink: 0;
-    width: 80px;
-    height: 110px;
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 10px;
-    padding: 8px 6px;
+    width: 90px;
+    height: 120px;
+    background: linear-gradient(155deg, #1a1a2a 0%, #111118 100%);
+    border: 1px solid #252535;
+    border-radius: 12px;
+    padding: 10px 8px 8px;
     position: relative;
     cursor: grab;
     user-select: none;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: space-between;
     transition: border-color 0.2s, box-shadow 0.2s;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
   .card:active {
     cursor: grabbing;
@@ -737,16 +865,20 @@
 
   .card-active {
     border-color: #7c3aed;
-    box-shadow: 0 0 12px rgba(124, 58, 237, 0.27);
+    box-shadow: 0 0 16px rgba(124, 58, 237, 0.38), inset 0 1px 0 rgba(255,255,255,0.07);
+  }
+
+  .card-deposit {
+    background: linear-gradient(155deg, #1a1428 0%, #100e1a 100%);
   }
 
   .card-clear {
     position: absolute;
-    top: 3px;
-    right: 4px;
+    top: 4px;
+    right: 5px;
     background: transparent;
     border: none;
-    color: #555;
+    color: #3a3a4a;
     font-size: 14px;
     cursor: pointer;
     line-height: 1;
@@ -759,61 +891,91 @@
   }
 
   .card-type {
-    font-size: 8.5px;
-    letter-spacing: 0.08em;
-    color: #666;
+    font-size: 8px;
+    letter-spacing: 0.14em;
+    color: #7c3aed;
     text-transform: uppercase;
+    font-weight: 700;
     text-align: center;
     margin-top: 2px;
+    margin-bottom: 4px;
+    flex-shrink: 0;
+  }
+
+  .card-divider {
+    width: 80%;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
+    margin-bottom: 6px;
   }
 
   .card-node {
-    font-size: 11px;
-    color: #e8e8e8;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
     text-align: center;
-    word-break: break-word;
-    padding: 0 2px;
-    line-height: 1.3;
+    width: 100%;
   }
-  .card-node.no-target {
-    color: #444;
-    font-style: italic;
+
+  .card-emoji {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .card-node-label {
     font-size: 10px;
+    color: #9ca3af;
+    word-break: break-word;
+    text-align: center;
+    line-height: 1.2;
+    padding: 0 4px;
+  }
+
+  .card-node.no-target {
+    font-size: 10px;
+    color: #35354a;
+    font-style: italic;
+    gap: 2px;
   }
 
   .ctrl-panel {
     flex-shrink: 0;
-    width: 150px;
+    width: 138px;
     display: flex;
     flex-direction: column;
     align-items: stretch;
     justify-content: center;
     gap: 6px;
     padding: 10px 12px;
-    border-left: 1px solid #222;
+    border-left: 1px solid rgba(255, 255, 255, 0.05);
     height: 100%;
     box-sizing: border-box;
   }
 
   .ctrl-btn {
     padding: 8px 0;
-    background: #1a1a1a;
-    border: 1px solid #333;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid #252535;
     border-radius: 8px;
-    color: #e8e8e8;
+    color: #c4c4cc;
     font-family: monospace;
     font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
     min-height: 38px;
   }
   .ctrl-btn:hover:not(:disabled) {
     background: #7c3aed;
     border-color: #7c3aed;
     color: #fff;
+    box-shadow: 0 0 10px rgba(124, 58, 237, 0.4);
   }
   .ctrl-btn:disabled {
-    opacity: 0.3;
+    opacity: 0.22;
     cursor: default;
   }
 </style>
